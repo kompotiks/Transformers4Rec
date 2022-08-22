@@ -598,7 +598,7 @@ class Trainer(BaseTrainer):
             num_samples=num_examples,
         )
 
-    def _save_model_and_checkpoint(self, save_model_class=False):
+    def _save_model_and_checkpoint(self, save_model_class=True):
         """
         Save the serialized model + trainer and random states.
 
