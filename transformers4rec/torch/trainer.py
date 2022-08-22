@@ -479,10 +479,14 @@ class Trainer(BaseTrainer):
         # Will be useful when we have an iterable dataset so don't know its length.
         observed_num_examples = 0
 
+        train_loader = iter(self.train_dataloader)
+        val_loader = iter(self.val_loader)
         # Iterate over dataloader
-        for step, inputs in enumerate(dataloader):
+        for step in range(len(self.val_loader)):
+            labels = next(val_loader)
+            train_inputs = next(train_loader)
             # Update the observed num examples
-            observed_batch_size = find_batch_size(inputs)
+            observed_batch_size = find_batch_size(train_inputs)
             if observed_batch_size is not None:
                 observed_num_examples += observed_batch_size
 
@@ -494,9 +498,9 @@ class Trainer(BaseTrainer):
             ):
                 break
 
-            loss, preds, labels, outputs = self.prediction_step(
+            loss, preds, _, outputs = self.prediction_step(
                 model,
-                inputs,
+                train_inputs,
                 prediction_loss_only,
                 ignore_keys=ignore_keys,
                 ignore_masking=ignore_masking,
@@ -1172,8 +1176,6 @@ class Trainer(BaseTrainer):
             Whether to save the Model class or not.
             by default False
         """
-        import os
-
         try:
             import cloudpickle
         except ImportError:
