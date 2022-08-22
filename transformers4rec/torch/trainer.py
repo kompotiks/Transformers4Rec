@@ -153,6 +153,8 @@ class Trainer(BaseTrainer):
         callbacks: Optional[List[TrainerCallback]] = [],
         compute_metrics=None,
         incremental_logging: bool = False,
+        max_steps_eval: int = None,
+        clean_out: bool = False,
         **kwargs,
     ):
 
@@ -183,6 +185,8 @@ class Trainer(BaseTrainer):
         self.test_dataloader = test_dataloader
         self.schema = schema
         self.incremental_logging = incremental_logging
+        self.max_steps_eval = max_steps_eval
+        self.clean_out = clean_out
 
     def get_train_dataloader(self):
         """
@@ -481,11 +485,16 @@ class Trainer(BaseTrainer):
 
         train_loader = iter(self.train_dataloader)
         val_loader = iter(self.eval_dataloader)
+        predict_metrics = []
+        cleanout_metrics = []
         # Iterate over dataloader
         for step in range(len(self.eval_dataloader)):
+            if step == self.max_steps_eval:
+                break
             labels = next(val_loader)
             labels = labels['item_id-list_trim'].cuda()
             train_inputs = next(train_loader)
+
             # Update the observed num examples
             observed_batch_size = find_batch_size(train_inputs)
             if observed_batch_size is not None:
@@ -512,9 +521,17 @@ class Trainer(BaseTrainer):
             metrics_results_detailed = None
             if self.compute_metrics:
                 if step % self.args.compute_metrics_each_n_steps == 0:
+                    preds_clean_out = preds.clone()
+                    preds_clean_out = preds_clean_out.scatter_(1, train_inputs['item_id-list_trim'].cuda(), -100)
+                    cleanout_metrics.append(
+                        model.calculate_metrics(
+                            preds_clean_out, labels, mode=metric_key_prefix, forward=False, call_body=False
+                        )
+                    )
                     metrics_results_detailed = model.calculate_metrics(
                         preds, labels, mode=metric_key_prefix, forward=False, call_body=False
                     )
+                    predict_metrics.append(metrics_results_detailed)
 
             # Update containers on host
             if loss is not None:
@@ -646,6 +663,12 @@ class Trainer(BaseTrainer):
             metrics = {**metrics, **streaming_metrics_results_flattened}
 
         metrics[f"{metric_key_prefix}_/loss"] = all_losses.mean().item()
+
+        predict_metrics = self.metric_count(predict_metrics)
+        cleanout_metrics = self.metric_count(cleanout_metrics)
+
+        self.plot_metrics(predict_metrics, 'predict')
+        self.plot_metrics(cleanout_metrics, 'cleanout')
 
         return EvalLoopOutput(
             predictions=all_preds_item_ids_scores,
