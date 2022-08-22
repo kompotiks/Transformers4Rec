@@ -199,7 +199,7 @@ def create_output_placeholder(scores, ks):
 
 
 def tranform_label_to_onehot(labels, vocab_size):
-    return one_hot_1d(labels.reshape(-1), vocab_size, dtype=torch.float32).detach()
+    return one_hot_2d(labels, vocab_size, dtype=torch.float32).detach()
 
 
 def one_hot_1d(
@@ -251,6 +251,33 @@ def one_hot_1d(
     labels_size = labels.shape[0]
     one_hot = torch.zeros(labels_size, num_classes, device=device, dtype=dtype)
     return one_hot.scatter_(1, labels.unsqueeze(-1), 1.0)
+
+
+def one_hot_2d(
+    labels: torch.Tensor,
+    num_classes: int,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = torch.float32,
+) -> torch.Tensor:
+    if not torch.is_tensor(labels):
+        raise TypeError("Input labels type is not a torch.Tensor. Got {}".format(type(labels)))
+    if not len(labels.shape) == 2:
+        raise ValueError("Expected tensor should have 1 dim. Got: {}".format(labels.shape))
+    if not labels.dtype == torch.int64:
+        raise ValueError(
+            "labels must be of the same dtype torch.int64. Got: {}".format(labels.dtype)
+        )
+    if num_classes < 1:
+        raise ValueError(
+            "The number of classes must be bigger than one." " Got: {}".format(num_classes)
+        )
+    if device is None:
+        device = labels.device
+    labels_size = labels.shape[0]
+    one_hot = torch.zeros(labels_size, num_classes, device=device, dtype=dtype)
+    one_hot = one_hot.scatter_(1, labels, 1.0)
+    one_hot[:, 0] = 0
+    return one_hot
 
 
 class LambdaModule(torch.nn.Module):

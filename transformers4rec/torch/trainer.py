@@ -480,10 +480,11 @@ class Trainer(BaseTrainer):
         observed_num_examples = 0
 
         train_loader = iter(self.train_dataloader)
-        val_loader = iter(self.val_loader)
+        val_loader = iter(self.eval_dataloader)
         # Iterate over dataloader
-        for step in range(len(self.val_loader)):
+        for step in range(len(self.eval_dataloader)):
             labels = next(val_loader)
+            labels = labels['item_id-list_trim'].cuda()
             train_inputs = next(train_loader)
             # Update the observed num examples
             observed_batch_size = find_batch_size(train_inputs)
