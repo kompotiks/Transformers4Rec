@@ -28,6 +28,7 @@ import warnings
 from collections.abc import Sized
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import matplotlib.pyplot as plt
 
 from packaging import version
 import numpy as np
@@ -100,6 +101,7 @@ TRAINER_STATE_NAME = "trainer_state.json"
 OPTIMIZER_NAME = "optimizer.pt"
 SCHEDULER_NAME = "scheduler.pt"
 SCALER_NAME = "scaler.pt"
+top_k = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
 
 class Trainer(BaseTrainer):
@@ -667,6 +669,14 @@ class Trainer(BaseTrainer):
         predict_metrics = self.metric_count(predict_metrics)
         cleanout_metrics = self.metric_count(cleanout_metrics)
 
+        print('\npredict')
+        for key in sorted(predict_metrics.keys()):
+            print(" %s = %s" % (key, str([round(i, 4) for i in predict_metrics[key].tolist()])))
+
+        print('\ncleanout')
+        for key in sorted(cleanout_metrics.keys()):
+            print(" %s = %s" % (key, str([round(i, 4) for i in cleanout_metrics[key].tolist()])))
+
         self.plot_metrics(predict_metrics, 'predict')
         self.plot_metrics(cleanout_metrics, 'cleanout')
 
@@ -676,6 +686,26 @@ class Trainer(BaseTrainer):
             metrics=metrics,
             num_samples=num_examples,
         )
+
+    def metric_count(self, values_metrics):
+        ndcg = torch.mean(torch.concat([i['next-item/ndcg_at'].unsqueeze(0) for i in values_metrics]), dim=0)
+        avg_precision = torch.mean(torch.concat([i['next-item/avg_precision_at'].unsqueeze(0) for i in values_metrics]),
+                                   dim=0)
+        recall = torch.mean(torch.concat([i['next-item/recall_at'].unsqueeze(0) for i in values_metrics]), dim=0)
+        return {
+            'next-item/ndcg_at': ndcg,
+            'next-item/avg_precision_at': avg_precision,
+            'next-item/recall_at': recall,
+        }
+
+    def plot_metrics(self, values_metrics, name):
+        [plt.plot(top_k, j.cpu().detach().numpy(), label=i) for i, j in values_metrics.items()]
+
+        plt.xlabel(f'x - top k {name}')
+        plt.ylabel('y - score')
+        plt.legend()
+        plt.savefig(f'{name}.png')
+        plt.show()
 
     def train(
         self,
