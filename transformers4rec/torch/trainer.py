@@ -95,6 +95,8 @@ from ..config.trainer import T4RecTrainingArguments
 from .model.base import Model
 from .utils.data_utils import T4RecDataLoader
 import pandas as pd
+from vvrecsys.datasets.reader import Reader
+
 
 logger = logging.get_logger(__name__)
 TRAINING_ARGS_NAME = "training_args.bin"
@@ -109,6 +111,9 @@ random_items = random_items.cuda()
 df = pd.read_csv('poptop_item.csv')
 top_items = df.id_tov_cl.to_list()
 top_items_tns = torch.zeros(len(top_items) + 3)
+dataset_info = Reader('bigdata.h5')
+items_encoder = dataset_info.items_encoder
+top_items = items_encoder.transform(top_items)
 value = 0.99
 for item in top_items:
     top_items_tns[item + 1] = value
