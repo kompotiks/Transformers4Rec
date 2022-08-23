@@ -94,6 +94,7 @@ from merlin_standard_lib import Schema
 from ..config.trainer import T4RecTrainingArguments
 from .model.base import Model
 from .utils.data_utils import T4RecDataLoader
+import pandas as pd
 
 logger = logging.get_logger(__name__)
 TRAINING_ARGS_NAME = "training_args.bin"
@@ -104,6 +105,18 @@ SCALER_NAME = "scaler.pt"
 top_k = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 random_items = torch.rand((512, 2911))
 random_items = random_items.cuda()
+
+df = pd.read_csv('poptop_item.csv')
+top_items = df.id_tov_cl.to_list()
+top_items_tns = torch.zeros(len(top_items) + 3)
+value = 0.99
+for item in top_items:
+    top_items_tns[item + 1] = value
+    value -= 0.0001
+top_k = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+
+top_items_tns = top_items_tns.unsqueeze(0).repeat(512, 1).cuda()
+
 
 class Trainer(BaseTrainer):
     """
@@ -491,6 +504,7 @@ class Trainer(BaseTrainer):
         predict_metrics = []
         cleanout_metrics = []
         random_metrics = []
+        poptop_metrics = []
         # Iterate over dataloader
         for step in range(len(self.eval_dataloader)):
             if step == self.max_steps_eval:
@@ -539,6 +553,11 @@ class Trainer(BaseTrainer):
                     random_metrics.append(
                         model.calculate_metrics(
                             random_items, labels, mode=metric_key_prefix, forward=False, call_body=False
+                        )
+                    )
+                    poptop_metrics.append(
+                        model.calculate_metrics(
+                            top_items_tns, labels, mode=metric_key_prefix, forward=False, call_body=False
                         )
                     )
 
@@ -676,10 +695,15 @@ class Trainer(BaseTrainer):
         predict_metrics = self.metric_count(predict_metrics)
         cleanout_metrics = self.metric_count(cleanout_metrics)
         random_metrics = self.metric_count(random_metrics)
+        poptop_metrics = self.metric_count(poptop_metrics)
 
         print('\nrandom')
         for key in sorted(random_metrics.keys()):
             print(" %s = %s" % (key, str([round(i, 4) for i in random_metrics[key].tolist()])))
+
+        print('\npoptop')
+        for key in sorted(poptop_metrics.keys()):
+            print(" %s = %s" % (key, str([round(i, 4) for i in poptop_metrics[key].tolist()])))
 
         print('\npredict')
         for key in sorted(predict_metrics.keys()):
@@ -692,6 +716,7 @@ class Trainer(BaseTrainer):
         self.plot_metrics(predict_metrics, 'predict')
         self.plot_metrics(cleanout_metrics, 'cleanout')
         self.plot_metrics(random_metrics, 'random')
+        self.plot_metrics(poptop_metrics, 'poptop')
 
         return EvalLoopOutput(
             predictions=all_preds_item_ids_scores,
@@ -712,7 +737,7 @@ class Trainer(BaseTrainer):
         }
 
     def plot_metrics(self, values_metrics, name):
-        [plt.plot(top_k, j.cpu().detach().numpy(), label=i) for i, j in values_metrics.items()]
+        [plt.plot(top_k, j.cpu().detach().numpy(),  'o-', label=i) for i, j in values_metrics.items()]
 
         plt.xlabel(f'x - top k {name}')
         plt.ylabel('y - score')
