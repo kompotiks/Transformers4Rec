@@ -102,7 +102,8 @@ OPTIMIZER_NAME = "optimizer.pt"
 SCHEDULER_NAME = "scheduler.pt"
 SCALER_NAME = "scaler.pt"
 top_k = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-
+random_items = torch.rand((512, 2911))
+random_items = random_items.cuda()
 
 class Trainer(BaseTrainer):
     """
@@ -489,6 +490,7 @@ class Trainer(BaseTrainer):
         val_loader = iter(self.eval_dataloader)
         predict_metrics = []
         cleanout_metrics = []
+        random_metrics = []
         # Iterate over dataloader
         for step in range(len(self.eval_dataloader)):
             if step == self.max_steps_eval:
@@ -534,6 +536,11 @@ class Trainer(BaseTrainer):
                         preds, labels, mode=metric_key_prefix, forward=False, call_body=False
                     )
                     predict_metrics.append(metrics_results_detailed)
+                    random_metrics.append(
+                        model.calculate_metrics(
+                            random_items, labels, mode=metric_key_prefix, forward=False, call_body=False
+                        )
+                    )
 
             # Update containers on host
             if loss is not None:
@@ -668,6 +675,11 @@ class Trainer(BaseTrainer):
 
         predict_metrics = self.metric_count(predict_metrics)
         cleanout_metrics = self.metric_count(cleanout_metrics)
+        random_metrics = self.metric_count(random_metrics)
+
+        print('\nrandom')
+        for key in sorted(random_metrics.keys()):
+            print(" %s = %s" % (key, str([round(i, 4) for i in random_metrics[key].tolist()])))
 
         print('\npredict')
         for key in sorted(predict_metrics.keys()):
@@ -679,6 +691,7 @@ class Trainer(BaseTrainer):
 
         self.plot_metrics(predict_metrics, 'predict')
         self.plot_metrics(cleanout_metrics, 'cleanout')
+        self.plot_metrics(random_metrics, 'random')
 
         return EvalLoopOutput(
             predictions=all_preds_item_ids_scores,
