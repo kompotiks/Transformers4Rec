@@ -56,6 +56,7 @@ from transformers.trainer_pt_utils import (
 from transformers.utils import (
     is_apex_available,
 )
+
 if is_apex_available():
     from apex import amp
 import torch.distributed as dist
@@ -79,6 +80,7 @@ from transformers.trainer_utils import (
     set_seed,
     speed_metrics,
 )
+
 if is_torch_tpu_available():
     import torch_xla.core.xla_model as xm
     import torch_xla.debug.metrics as met
@@ -97,7 +99,6 @@ from .utils.data_utils import T4RecDataLoader
 import pandas as pd
 from vvrecsys.datasets.reader import Reader
 
-
 logger = logging.get_logger(__name__)
 TRAINING_ARGS_NAME = "training_args.bin"
 TRAINER_STATE_NAME = "trainer_state.json"
@@ -108,11 +109,13 @@ top_k = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 random_items = torch.rand((512, 2911))
 random_items = random_items.cuda()
 
+dataset_info = Reader('bigdata.h5')
+items_encoder = dataset_info.items_encoder
+
 df = pd.read_csv('poptop_item.csv')
 top_items = df.id_tov_cl.to_list()
 top_items_tns = torch.zeros(len(top_items) + 3)
-dataset_info = Reader('bigdata.h5')
-items_encoder = dataset_info.items_encoder
+
 top_items = items_encoder.transform(top_items)
 value = 0.99
 for item in top_items:
@@ -161,22 +164,22 @@ class Trainer(BaseTrainer):
     """
 
     def __init__(
-        self,
-        model: Model,
-        args: T4RecTrainingArguments,
-        schema: Schema = None,
-        train_dataset_or_path=None,
-        eval_dataset_or_path=None,
-        test_dataset_or_path=None,
-        train_dataloader: Optional[DataLoader] = None,
-        eval_dataloader: Optional[DataLoader] = None,
-        test_dataloader: Optional[DataLoader] = None,
-        callbacks: Optional[List[TrainerCallback]] = [],
-        compute_metrics=None,
-        incremental_logging: bool = False,
-        max_steps_eval: int = None,
-        clean_out: bool = False,
-        **kwargs,
+            self,
+            model: Model,
+            args: T4RecTrainingArguments,
+            schema: Schema = None,
+            train_dataset_or_path=None,
+            eval_dataset_or_path=None,
+            test_dataset_or_path=None,
+            train_dataloader: Optional[DataLoader] = None,
+            eval_dataloader: Optional[DataLoader] = None,
+            test_dataloader: Optional[DataLoader] = None,
+            callbacks: Optional[List[TrainerCallback]] = [],
+            compute_metrics=None,
+            incremental_logging: bool = False,
+            max_steps_eval: int = None,
+            clean_out: bool = False,
+            **kwargs,
     ):
 
         mock_dataset = DatasetMock()
@@ -311,7 +314,7 @@ class Trainer(BaseTrainer):
                 num_warmup_steps=self.args.warmup_steps,
                 num_training_steps=num_training_steps,
                 num_cycles=self.args.learning_rate_num_cosine_cycles_by_epoch
-                * self.args.num_train_epochs,
+                           * self.args.num_train_epochs,
             )
 
     # Override the method get_scheduler to accept num_cycle params ?
@@ -319,11 +322,11 @@ class Trainer(BaseTrainer):
     # we can also send a PR to HF ?
     @staticmethod
     def get_scheduler(
-        name: Union[str, SchedulerType],
-        optimizer: Optimizer,
-        num_warmup_steps: Optional[int] = None,
-        num_training_steps: Optional[int] = None,
-        num_cycles: Optional[int] = 0.5,
+            name: Union[str, SchedulerType],
+            optimizer: Optimizer,
+            num_warmup_steps: Optional[int] = None,
+            num_training_steps: Optional[int] = None,
+            num_cycles: Optional[int] = 0.5,
     ):
         """
         Unified API to get any scheduler from its name.
@@ -375,12 +378,12 @@ class Trainer(BaseTrainer):
         )
 
     def prediction_step(
-        self,
-        model: torch.nn.Module,
-        inputs: Dict[str, torch.Tensor],
-        prediction_loss_only: bool,
-        ignore_keys: Optional[List[str]] = None,
-        ignore_masking: bool = False,
+            self,
+            model: torch.nn.Module,
+            inputs: Dict[str, torch.Tensor],
+            prediction_loss_only: bool,
+            ignore_keys: Optional[List[str]] = None,
+            ignore_masking: bool = False,
     ) -> Tuple[
         Optional[float],
         Optional[torch.Tensor],
@@ -420,12 +423,12 @@ class Trainer(BaseTrainer):
         return (loss, predictions, labels, other_outputs)
 
     def evaluation_loop(
-        self,
-        dataloader: DataLoader,
-        description: str,
-        prediction_loss_only: Optional[bool] = None,
-        ignore_keys: Optional[List[str]] = None,
-        metric_key_prefix: Optional[str] = "eval",
+            self,
+            dataloader: DataLoader,
+            description: str,
+            prediction_loss_only: Optional[bool] = None,
+            ignore_keys: Optional[List[str]] = None,
+            metric_key_prefix: Optional[str] = "eval",
     ) -> EvalLoopOutput:
         """
         Overriding :obj:`Trainer.prediction_loop()`
@@ -525,9 +528,9 @@ class Trainer(BaseTrainer):
 
             # Limits the number of evaluation steps on train set (which is usually larger)
             if (
-                metric_key_prefix == "train"
-                and self.args.eval_steps_on_train_set > 0
-                and step + 1 > self.args.eval_steps_on_train_set
+                    metric_key_prefix == "train"
+                    and self.args.eval_steps_on_train_set > 0
+                    and step + 1 > self.args.eval_steps_on_train_set
             ):
                 break
 
@@ -614,8 +617,8 @@ class Trainer(BaseTrainer):
             # Gather all tensors and put them back on the CPU
             # if we have done enough accumulation steps.
             if (
-                self.args.eval_accumulation_steps is not None
-                and (step + 1) % self.args.eval_accumulation_steps == 0
+                    self.args.eval_accumulation_steps is not None
+                    and (step + 1) % self.args.eval_accumulation_steps == 0
             ):
                 if losses_host is not None:
                     losses = nested_numpify(losses_host)
@@ -718,10 +721,8 @@ class Trainer(BaseTrainer):
         for key in sorted(cleanout_metrics.keys()):
             print(" %s = %s" % (key, str([round(i, 4) for i in cleanout_metrics[key].tolist()])))
 
-        self.plot_metrics(predict_metrics, 'predict')
-        self.plot_metrics(cleanout_metrics, 'cleanout')
-        self.plot_metrics(random_metrics, 'random')
-        self.plot_metrics(poptop_metrics, 'poptop')
+        self.plot_metrics(predict_metrics, cleanout_metrics, random_metrics, poptop_metrics,
+                          name=['predict', 'cleanout', 'random', 'poptop'])
 
         return EvalLoopOutput(
             predictions=all_preds_item_ids_scores,
@@ -741,21 +742,23 @@ class Trainer(BaseTrainer):
             'next-item/recall_at': recall,
         }
 
-    def plot_metrics(self, values_metrics, name):
-        [plt.plot(top_k, j.cpu().detach().numpy(),  'o-', label=i) for i, j in values_metrics.items()]
+    def plot_metrics(self, predict_metrics, cleanout_metrics, random_metrics, poptop_metrics, name):
+        for *metric, name_metrics in zip(predict_metrics.values(), cleanout_metrics.values(), random_metrics.values(),
+                                         poptop_metrics.values(), predict_metrics.keys()):
+            [plt.plot(top_k, i.cpu().detach().numpy(), 'o-', label=j) for i, j in zip(metric, name)]
 
-        plt.xlabel(f'x - top k {name}')
-        plt.ylabel('y - score')
-        plt.legend()
-        plt.savefig(f'{name}.png')
-        plt.show()
+            plt.xlabel(f'x - top k {name_metrics.split("/")[1]}')
+            plt.ylabel('y - score')
+            plt.legend()
+            plt.savefig(f'{name_metrics.split("/")[1]}.png')
+            plt.show()
 
     def train(
-        self,
-        resume_from_checkpoint: Optional[Union[str, bool]] = None,
-        trial: Union["optuna.Trial", Dict[str, Any]] = None,
-        ignore_keys_for_eval: Optional[List[str]] = None,
-        **kwargs,
+            self,
+            resume_from_checkpoint: Optional[Union[str, bool]] = None,
+            trial: Union["optuna.Trial", Dict[str, Any]] = None,
+            ignore_keys_for_eval: Optional[List[str]] = None,
+            **kwargs,
     ):
         """
         Main training entry point.
@@ -899,7 +902,7 @@ class Trainer(BaseTrainer):
                 debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
 
         delay_optimizer_creation = (
-            self.sharded_ddp is not None and self.sharded_ddp != ShardedDDPOption.SIMPLE or is_sagemaker_mp_enabled()
+                self.sharded_ddp is not None and self.sharded_ddp != ShardedDDPOption.SIMPLE or is_sagemaker_mp_enabled()
         )
         if args.deepspeed:
             deepspeed_engine, optimizer, lr_scheduler = deepspeed_init(
@@ -953,7 +956,7 @@ class Trainer(BaseTrainer):
 
         # Check if continuing training from a checkpoint
         if resume_from_checkpoint is not None and os.path.isfile(
-            os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME)
+                os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME)
         ):
             self.state = TrainerState.load_from_json(os.path.join(resume_from_checkpoint, TRAINER_STATE_NAME))
             epochs_trained = self.state.global_step // num_update_steps_per_epoch
@@ -1061,9 +1064,9 @@ class Trainer(BaseTrainer):
                     self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
 
                 if (
-                    ((step + 1) % args.gradient_accumulation_steps != 0)
-                    and args.local_rank != -1
-                    and args._no_sync_in_gradient_accumulation
+                        ((step + 1) % args.gradient_accumulation_steps != 0)
+                        and args.local_rank != -1
+                        and args._no_sync_in_gradient_accumulation
                 ):
                     # Avoid unnecessary DDP synchronization since there will be no backward pass on this example.
                     with model.no_sync():
@@ -1072,9 +1075,9 @@ class Trainer(BaseTrainer):
                     tr_loss_step = self.training_step(model, inputs)
 
                 if (
-                    args.logging_nan_inf_filter
-                    and not is_torch_tpu_available()
-                    and (torch.isnan(tr_loss_step) or torch.isinf(tr_loss_step))
+                        args.logging_nan_inf_filter
+                        and not is_torch_tpu_available()
+                        and (torch.isnan(tr_loss_step) or torch.isinf(tr_loss_step))
                 ):
                     # if loss is nan or inf simply add the average of previous logged losses
                     tr_loss += tr_loss / (1 + self.state.global_step - self._globalstep_last_logged)
@@ -1088,9 +1091,9 @@ class Trainer(BaseTrainer):
                     self.deepspeed.step()
 
                 if (step + 1) % args.gradient_accumulation_steps == 0 or (
-                    # last step in epoch but step is always smaller than gradient_accumulation_steps
-                    steps_in_epoch <= args.gradient_accumulation_steps
-                    and (step + 1) == steps_in_epoch
+                        # last step in epoch but step is always smaller than gradient_accumulation_steps
+                        steps_in_epoch <= args.gradient_accumulation_steps
+                        and (step + 1) == steps_in_epoch
                 ):
                     # Gradient clipping
                     if args.max_grad_norm is not None and args.max_grad_norm > 0 and not self.deepspeed:
@@ -1345,12 +1348,12 @@ class Trainer(BaseTrainer):
         self.__log_predictions_callback = var
 
     def _maybe_log_predictions(
-        self,
-        labels: torch.Tensor,
-        pred_item_ids: torch.Tensor,
-        pred_item_scores: torch.Tensor,
-        metrics: Dict[str, np.ndarray],
-        metric_key_prefix: str,
+            self,
+            labels: torch.Tensor,
+            pred_item_ids: torch.Tensor,
+            pred_item_scores: torch.Tensor,
+            metrics: Dict[str, np.ndarray],
+            metric_key_prefix: str,
     ):
         """
         If --log_predictions is enabled, calls a callback function to
@@ -1383,8 +1386,8 @@ class Trainer(BaseTrainer):
                 labels=labels.cpu().numpy(),
                 pred_item_ids=pred_item_ids.cpu().numpy(),
                 pred_item_scores=pred_item_scores.cpu()
-                .numpy()
-                .astype(np.float32),  # Because it is float16 when --fp16
+                    .numpy()
+                    .astype(np.float32),  # Because it is float16 when --fp16
                 # preds_metadata=preds_metadata,
                 metrics=metrics,
                 dataset_type=metric_key_prefix,
