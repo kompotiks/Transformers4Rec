@@ -547,13 +547,6 @@ class Trainer(BaseTrainer):
             metrics_results_detailed = None
             if self.compute_metrics:
                 if step % self.args.compute_metrics_each_n_steps == 0:
-                    preds_clean_out = preds.clone()
-                    preds_clean_out = preds_clean_out.scatter_(1, train_inputs['item_id-list_trim'].cuda(), -100)
-                    cleanout_metrics.append(
-                        model.calculate_metrics(
-                            preds_clean_out, labels, mode=metric_key_prefix, forward=False, call_body=False
-                        )
-                    )
                     metrics_results_detailed = model.calculate_metrics(
                         preds, labels, mode=metric_key_prefix, forward=False, call_body=False
                     )
@@ -561,6 +554,13 @@ class Trainer(BaseTrainer):
                     random_metrics.append(
                         model.calculate_metrics(
                             random_items, labels, mode=metric_key_prefix, forward=False, call_body=False
+                        )
+                    )
+                    preds_clean_out = preds.clone()
+                    preds_clean_out = preds_clean_out.scatter_(1, train_inputs['item_id-list_trim'].cuda(), -100)
+                    cleanout_metrics.append(
+                        model.calculate_metrics(
+                            preds_clean_out, labels, mode=metric_key_prefix, forward=False, call_body=False
                         )
                     )
                     poptop_metrics.append(
@@ -733,13 +733,16 @@ class Trainer(BaseTrainer):
 
     def metric_count(self, values_metrics):
         ndcg = torch.mean(torch.concat([i['next-item/ndcg_at'].unsqueeze(0) for i in values_metrics]), dim=0)
-        avg_precision = torch.mean(torch.concat([i['next-item/avg_precision_at'].unsqueeze(0) for i in values_metrics]),
+        avg_precision = torch.mean(torch.concat([i['next-item/precision_at'].unsqueeze(0) for i in values_metrics]),
                                    dim=0)
         recall = torch.mean(torch.concat([i['next-item/recall_at'].unsqueeze(0) for i in values_metrics]), dim=0)
+        map = torch.mean(torch.concat([i['next-item/mean_recipricol_rank_at'].unsqueeze(0) for i in values_metrics]),
+                         dim=0)
         return {
             'next-item/ndcg_at': ndcg,
             'next-item/avg_precision_at': avg_precision,
             'next-item/recall_at': recall,
+            'next-item/mean_recipricol_rank_at': map,
         }
 
     def plot_metrics(self, predict_metrics, cleanout_metrics, random_metrics, poptop_metrics, name):
