@@ -112,21 +112,13 @@ SCALER_NAME = "scaler.pt"
 dataset_info = Reader('bigdata.h5')
 items_encoder = dataset_info.items_encoder
 
-random_items = torch.rand((512, len(items_encoder.classes_) + 10))
-random_items = torch.argsort(random_items, descending=True)
-random_items = random_items
-
 df = pd.read_csv('poptop_item.csv')
 top_items = df.id_tov_cl.to_list()
 
-top_items = items_encoder.transform(top_items)
-top_items = torch.tensor(top_items)
-top_items_tns = top_items.unsqueeze(0).repeat(512, 1)
-top_items_tns += 1
 top_k = [10, 20, 30, 40, 50, 60, 70, 80, 90]
 
-ease_df = pd.read_csv('full_ease_top100_userset.csv', sep=';')
-ease_clean_df = pd.read_csv('full_ease_top100_userset_clean.csv', sep=';')
+ease_df = pd.read_csv('ease_predict.csv', sep=';')
+ease_clean_df = pd.read_csv('ease_clean.csv', sep=';')
 
 
 def create_top(items):
@@ -145,14 +137,14 @@ def create_ease_pred(ease_df, id_users):
     for idx, id_user in enumerate(id_users):
         pred_ease = ease_df[ease_df.bonus_card == id_user].item_id.to_list()[0].split(',')
         pred_ease = list(map(int, pred_ease))
-        if 15846 in pred_ease:
-            pred_ease.remove(15846)
-        if 22334 in pred_ease:
-            pred_ease.remove(22334)
-        if 18303 in pred_ease:
-            pred_ease.remove(18303)
-        if 20834 in pred_ease:
-            pred_ease.remove(20834)
+        # if 15846 in pred_ease:
+        #     pred_ease.remove(15846)
+        # if 22334 in pred_ease:
+        #     pred_ease.remove(22334)
+        # if 18303 in pred_ease:
+        #     pred_ease.remove(18303)
+        # if 20834 in pred_ease:
+        #     pred_ease.remove(20834)
         pred_ease = items_encoder.transform(pred_ease)
         pred_ease = torch.tensor(pred_ease)[:90].unsqueeze(0)
         pred_ease_list.append(pred_ease)
@@ -551,8 +543,6 @@ class Trainer(BaseTrainer):
         predict_metrics_p = defaultdict(list)
         cleanout_metrics_r = defaultdict(list)
         cleanout_metrics_p = defaultdict(list)
-        random_metrics_r = defaultdict(list)
-        random_metrics_p = defaultdict(list)
         poptop_metrics_r = defaultdict(list)
         poptop_metrics_p = defaultdict(list)
         ease_metrics_r = defaultdict(list)
@@ -597,14 +587,13 @@ class Trainer(BaseTrainer):
                         preds.cuda(), labels.cuda(), mode=metric_key_prefix, forward=False, call_body=False
                     )
 
-                    random_items_bin = get_top_k(random_items)
                     ease_items = create_ease_pred(ease_df, train_inputs['user_id'])
                     ease_items += 1
                     ease_items = get_top_k(ease_items)
                     ease_clean_items = create_ease_pred(ease_clean_df, train_inputs['user_id'])
                     ease_clean_items += 1
                     ease_clean_items = get_top_k(ease_clean_items)
-                    top_items_tns_bin = get_top_k(top_items_tns)
+                    # top_items_tns_bin = get_top_k(top_items_tns)
                     preds = preds.cpu()
                     labels = labels.cpu()
                     preds_clean_out = preds.clone()
@@ -623,17 +612,11 @@ class Trainer(BaseTrainer):
                             cleanout_metrics_r[j].append(recall_score(labels_bin[i, :], preds_clean_out[j][i, :], average='binary', zero_division=0))
                             cleanout_metrics_p[j].append(precision_score(labels_bin[i, :], preds_clean_out[j][i, :], average='binary', zero_division=0))
 
-                            poptop_metrics_r[j].append(recall_score(labels_bin[i, :], top_items_tns_bin[j][i, :], average='binary', zero_division=0))
-                            poptop_metrics_p[j].append(precision_score(labels_bin[i, :], top_items_tns_bin[j][i, :], average='binary', zero_division=0))
-
                             ease_metrics_r[j].append(recall_score(labels_bin[i, :], ease_items[j][i, :], average='binary', zero_division=0))
                             ease_metrics_p[j].append(precision_score(labels_bin[i, :], ease_items[j][i, :], average='binary', zero_division=0))
 
                             ease_clean_metrics_r[j].append(recall_score(labels_bin[i, :], ease_clean_items[j][i, :], average='binary', zero_division=0))
                             ease_clean_metrics_p[j].append(precision_score(labels_bin[i, :], ease_clean_items[j][i, :], average='binary', zero_division=0))
-
-                            random_metrics_r[j].append(recall_score(labels_bin[i, :], random_items_bin[j][i, :], average='binary', zero_division=0))
-                            random_metrics_p[j].append(precision_score(labels_bin[i, :], random_items_bin[j][i, :], average='binary', zero_division=0))
 
             # Update containers on host
             if loss is not None:
@@ -766,12 +749,6 @@ class Trainer(BaseTrainer):
 
         metrics[f"{metric_key_prefix}_/loss"] = all_losses.mean().item()
 
-        random_metrics_p = [round(np.mean(j), 4) for _, j in random_metrics_p.items()]
-        random_metrics_r = [round(np.mean(j), 4) for _, j in random_metrics_r.items()]
-
-        poptop_metrics_p = [round(np.mean(j), 4) for _, j in poptop_metrics_p.items()]
-        poptop_metrics_r = [round(np.mean(j), 4) for _, j in poptop_metrics_r.items()]
-
         predict_metrics_p = [round(np.mean(j), 4) for _, j in predict_metrics_p.items()]
         predict_metrics_r = [round(np.mean(j), 4) for _, j in predict_metrics_r.items()]
 
@@ -783,14 +760,6 @@ class Trainer(BaseTrainer):
 
         ease_clean_metrics_p = [round(np.mean(j), 4) for _, j in ease_clean_metrics_p.items()]
         ease_clean_metrics_r = [round(np.mean(j), 4) for _, j in ease_clean_metrics_r.items()]
-
-        metrics_show = '\nrandom\n'
-        metrics_show += 'Recall' + str(random_metrics_r) + '\n'
-        metrics_show += 'Precision' + str(random_metrics_p) + '\n'
-
-        metrics_show += '\npoptop\n'
-        metrics_show += 'Recall' + str(poptop_metrics_r) + '\n'
-        metrics_show += 'Precision' + str(poptop_metrics_p) + '\n'
 
         metrics_show += '\npredict\n'
         metrics_show += 'Recall' + str(predict_metrics_r) + '\n'
@@ -811,8 +780,6 @@ class Trainer(BaseTrainer):
         plt.plot(top_k, ease_clean_metrics_r, 'o-', label='ease_clean')
         plt.plot(top_k, cleanout_metrics_r, 'o-', label='clean')
         plt.plot(top_k, predict_metrics_r, 'o-', label='predict')
-        plt.plot(top_k, poptop_metrics_r, 'o-', label='poptop')
-        plt.plot(top_k, random_metrics_r, 'o-', label='random')
 
         plt.xlabel(f'x - top k Recall')
         plt.ylabel('y - score')
@@ -824,8 +791,6 @@ class Trainer(BaseTrainer):
         plt.plot(top_k, ease_clean_metrics_p, 'o-', label='ease_clean')
         plt.plot(top_k, cleanout_metrics_p, 'o-', label='clean')
         plt.plot(top_k, predict_metrics_p, 'o-', label='predict')
-        plt.plot(top_k, poptop_metrics_p, 'o-', label='poptop')
-        plt.plot(top_k, random_metrics_p, 'o-', label='random')
 
         plt.xlabel(f'x - top k Precision')
         plt.ylabel('y - score')
