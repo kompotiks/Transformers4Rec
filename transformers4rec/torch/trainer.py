@@ -113,7 +113,8 @@ SCALER_NAME = "scaler.pt"
 
 dataset_info = Reader('bigdata.h5')
 items_encoder = dataset_info.items_encoder
-SIZE_TENSOR = len(items_encoder) + 1
+SIZE_TENSOR = len(items_encoder.classes_) + 1
+
 df = pd.read_csv('poptop_item.csv')
 top_items = df.id_tov_cl.to_list()
 
