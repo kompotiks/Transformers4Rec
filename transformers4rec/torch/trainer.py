@@ -99,7 +99,9 @@ from .model.base import Model
 from .utils.data_utils import T4RecDataLoader
 import pandas as pd
 from vvrecsys.datasets.reader import Reader
+from vvrecsys.metrics import online, offline
 from sklearn.metrics import recall_score, precision_score
+from torchmetrics import MetricCollection, Precision, Recall
 
 
 logger = logging.get_logger(__name__)
@@ -120,9 +122,10 @@ top_k = [10, 20, 30, 40, 50, 60, 70, 80, 90]
 ease_df = pd.read_csv('ease_predict.csv', sep=';')
 ease_clean_df = pd.read_csv('ease_clean.csv', sep=';')
 
+softmax = nn.Softmax(dim=1)
 
 def create_top(items):
-    pred_tensor = torch.zeros((512, len(items_encoder.classes_) + 10), dtype=torch.long)
+    pred_tensor = torch.zeros((512, 2911), dtype=torch.long)
     pred_tensor = pred_tensor.scatter_(1, items, 1)
     return pred_tensor
 
@@ -137,21 +140,31 @@ def create_ease_pred(ease_df, id_users):
     for idx, id_user in enumerate(id_users):
         pred_ease = ease_df[ease_df.bonus_card == id_user].item_id.to_list()[0].split(',')
         pred_ease = list(map(int, pred_ease))
-        # if 15846 in pred_ease:
-        #     pred_ease.remove(15846)
-        # if 22334 in pred_ease:
-        #     pred_ease.remove(22334)
-        # if 18303 in pred_ease:
-        #     pred_ease.remove(18303)
-        # if 20834 in pred_ease:
-        #     pred_ease.remove(20834)
         pred_ease = items_encoder.transform(pred_ease)
-        pred_ease = torch.tensor(pred_ease)[:90].unsqueeze(0)
+        pred_ease = torch.tensor(pred_ease).unsqueeze(0)
         pred_ease_list.append(pred_ease)
 
     pred_ease_tensor = torch.concat(pred_ease_list, dim=0)
     return pred_ease_tensor
 
+
+def get_metrics(pred, targets_binary, average='samples'):
+    return {
+        'precision': offline.precision(pred, targets_binary, topk=top_k, average=average),
+        'recall': offline.recall(pred, targets_binary, topk=top_k, average=average),
+        'f1': offline.f1(pred, targets_binary, topk=top_k, average=average),
+        'map': offline.mean_average_precision(pred, targets_binary, topk=top_k),
+    }
+
+
+def astensor(indices):
+    sample = torch.zeros((512, 2911))
+    for i in range(indices.shape[0]):
+        tensor = indices[i, :]
+        values = torch.arange(len(tensor))
+        values = (values.max() - values + 1) / (values.max() + 1)
+        sample[i, tensor] = values
+    return sample
 
 class Trainer(BaseTrainer):
     """
@@ -486,6 +499,23 @@ class Trainer(BaseTrainer):
             Prefix to use when logging evaluation metrics.
             by default `eval`
         """
+        metrics = {}
+        metrics.update(
+            {
+                f"Recall_top_{k}": Recall(num_classes=2911, top_k=k)
+                for k in top_k
+            }
+        )
+        metrics.update(
+            {
+                f"Precision_top_{k}": Precision(num_classes=2911, top_k=k)
+                for k in top_k
+            }
+        )
+        metrics = MetricCollection(metrics)
+        clean_metrics = metrics.clone(prefix="clean_")
+        pred_metrics = metrics.clone(prefix="pred_")
+
         prediction_loss_only = (
             prediction_loss_only
             if prediction_loss_only is not None
@@ -539,16 +569,22 @@ class Trainer(BaseTrainer):
 
         train_loader = iter(self.train_dataloader)
         val_loader = iter(self.eval_dataloader)
-        predict_metrics_r = defaultdict(list)
-        predict_metrics_p = defaultdict(list)
-        cleanout_metrics_r = defaultdict(list)
-        cleanout_metrics_p = defaultdict(list)
-        poptop_metrics_r = defaultdict(list)
-        poptop_metrics_p = defaultdict(list)
-        ease_metrics_r = defaultdict(list)
-        ease_metrics_p = defaultdict(list)
-        ease_clean_metrics_r = defaultdict(list)
-        ease_clean_metrics_p = defaultdict(list)
+        # predict_metrics_r = defaultdict(list)
+        # predict_metrics_p = defaultdict(list)
+        # cleanout_metrics_r = defaultdict(list)
+        # cleanout_metrics_p = defaultdict(list)
+        # poptop_metrics_r = defaultdict(list)
+        # poptop_metrics_p = defaultdict(list)
+        # ease_metrics_r = defaultdict(list)
+        # ease_metrics_p = defaultdict(list)
+        # ease_clean_metrics_r = defaultdict(list)
+        # ease_clean_metrics_p = defaultdict(list)
+        preds_all = []
+        preds_clean_all = []
+        ease_all = []
+        ease_clean_all = []
+        trg_all = []
+        trg_clean_all = []
         # Iterate over dataloader
         for step in range(len(self.eval_dataloader)):
             if step == self.max_steps_eval:
@@ -586,37 +622,85 @@ class Trainer(BaseTrainer):
                     metrics_results_detailed = model.calculate_metrics(
                         preds.cuda(), labels.cuda(), mode=metric_key_prefix, forward=False, call_body=False
                     )
+                    preds = preds.cpu()
 
                     ease_items = create_ease_pred(ease_df, train_inputs['user_id'])
                     ease_items += 1
-                    ease_items = get_top_k(ease_items)
+                    ease_items = astensor(ease_items)
+                    ease_items.cuda()
+                    ease_all.append(ease_items)
+
                     ease_clean_items = create_ease_pred(ease_clean_df, train_inputs['user_id'])
                     ease_clean_items += 1
-                    ease_clean_items = get_top_k(ease_clean_items)
-                    # top_items_tns_bin = get_top_k(top_items_tns)
-                    preds = preds.cpu()
-                    labels = labels.cpu()
+                    ease_clean_items = astensor(ease_clean_items)
+                    ease_clean_items.cuda()
+                    ease_clean_all.append(ease_clean_items)
+
+                    preds_all.append(softmax(preds))
+
+                    tmp_tensor = train_inputs['item_id-list_trim']
+                    tmp_tensor.cpu()
                     preds_clean_out = preds.clone()
-                    tmp_tensor = train_inputs['item_id-list_trim'].cpu()
-                    preds_clean_out = preds_clean_out.scatter_(1, tmp_tensor, -100)
-                    preds_clean_out = get_top_k(torch.argsort(preds_clean_out, descending=True))
-                    preds_bin = get_top_k(torch.argsort(preds, descending=True))
-                    labels_bin = torch.zeros(512, len(items_encoder.classes_) + 10)
+                    preds_clean_out = preds_clean_out.scatter_(1, tmp_tensor, float('-inf'))
+                    preds_clean_out.cuda()
+                    preds_clean_out = softmax(preds_clean_out)
+                    preds_clean_all.append(preds_clean_out)
+
+                    labels_bin = torch.zeros(512, 2911, dtype=torch.long)
                     labels_bin = labels_bin.scatter_(1, labels, 1)
+                    labels_bin.cuda()
+                    trg_all.append(labels_bin)
 
-                    for j in preds_bin.keys():
-                        for i in range(512):
-                            predict_metrics_r[j].append(recall_score(labels_bin[i, :], preds_bin[j][i, :], average='binary', zero_division=0))
-                            predict_metrics_p[j].append(precision_score(labels_bin[i, :], preds_bin[j][i, :], average='binary', zero_division=0))
+                    labels_clean = labels_bin.clone()
+                    labels_clean = labels_clean.scatter_(1, tmp_tensor, 0)
+                    labels_clean.cuda()
+                    trg_clean_all.append(labels_clean)
 
-                            cleanout_metrics_r[j].append(recall_score(labels_bin[i, :], preds_clean_out[j][i, :], average='binary', zero_division=0))
-                            cleanout_metrics_p[j].append(precision_score(labels_bin[i, :], preds_clean_out[j][i, :], average='binary', zero_division=0))
 
-                            ease_metrics_r[j].append(recall_score(labels_bin[i, :], ease_items[j][i, :], average='binary', zero_division=0))
-                            ease_metrics_p[j].append(precision_score(labels_bin[i, :], ease_items[j][i, :], average='binary', zero_division=0))
+                    # ease_items = create_ease_pred(ease_df, train_inputs['user_id'])
+                    # ease_items += 1
+                    # ease_items = get_top_k(ease_items)
+                    # ease_clean_items = create_ease_pred(ease_clean_df, train_inputs['user_id'])
+                    # ease_clean_items += 1
+                    # ease_clean_items = get_top_k(ease_clean_items)
+                    # preds = preds.cpu()
+                    # preds_bin = get_top_k(torch.argsort(preds, descending=True))
+                    # labels = labels.cpu()
+                    # preds_clean_out = preds.clone()
+                    # tmp_tensor = train_inputs['item_id-list_trim'].cpu()
+                    # preds_clean_out = preds_clean_out.scatter_(1, tmp_tensor, float('-inf'))
+                    # preds_clean_out = get_top_k(torch.argsort(preds_clean_out, descending=True))
+                    #
+                    # labels_bin = torch.zeros(512, len(items_encoder.classes_) + 3, dtype=torch.long)
+                    # labels_bin = labels_bin.scatter_(1, labels, 1)
+                    # label_clean = labels_bin.clone()
+                    # label_clean = label_clean.scatter_(1, tmp_tensor, 0)
 
-                            ease_clean_metrics_r[j].append(recall_score(labels_bin[i, :], ease_clean_items[j][i, :], average='binary', zero_division=0))
-                            ease_clean_metrics_p[j].append(precision_score(labels_bin[i, :], ease_clean_items[j][i, :], average='binary', zero_division=0))
+                    # for i in range(labels.shape[0]):
+                    #     for j in range(labels.shape[1]):
+                    #         labels_bin[i, labels[i, j]] += 1
+                    # labels_bin[:, 0] = 0
+                    # preds_count = torch.zeros(512, preds.shape[1], dtype=torch.long)
+                    # preds = softmax(preds)
+                    # pred_metrics(preds.cpu(), labels_bin.cpu())
+                    # tmp_tensor = train_inputs['item_id-list_trim']
+                    # preds = preds.scatter_(1, tmp_tensor.cuda(), float("-inf"))
+                    # preds = softmax(preds)
+                    # clean_metrics(preds.cpu(), labels_bin.cpu())
+
+                    # for j in preds_bin.keys():
+                    #     for i in range(512):
+                    #         predict_metrics_r[j].append(recall_score(labels_bin[i, :], preds_bin[j][i, :], average='binary', zero_division=0))
+                    #         predict_metrics_p[j].append(precision_score(labels_bin[i, :], preds_bin[j][i, :], average='binary', zero_division=0))
+                    #
+                    #         cleanout_metrics_r[j].append(recall_score(label_clean[i, :], preds_clean_out[j][i, :], average='binary', zero_division=0))
+                    #         cleanout_metrics_p[j].append(precision_score(label_clean[i, :], preds_clean_out[j][i, :], average='binary', zero_division=0))
+                    #
+                    #         ease_metrics_r[j].append(recall_score(labels_bin[i, :], ease_items[j][i, :], average='binary', zero_division=0))
+                    #         ease_metrics_p[j].append(precision_score(labels_bin[i, :], ease_items[j][i, :], average='binary', zero_division=0))
+                    #
+                    #         ease_clean_metrics_r[j].append(recall_score(label_clean[i, :], ease_clean_items[j][i, :], average='binary', zero_division=0))
+                    #         ease_clean_metrics_p[j].append(precision_score(label_clean[i, :], ease_clean_items[j][i, :], average='binary', zero_division=0))
 
             # Update containers on host
             if loss is not None:
@@ -749,54 +833,74 @@ class Trainer(BaseTrainer):
 
         metrics[f"{metric_key_prefix}_/loss"] = all_losses.mean().item()
 
-        predict_metrics_p = [round(np.mean(j), 4) for _, j in predict_metrics_p.items()]
-        predict_metrics_r = [round(np.mean(j), 4) for _, j in predict_metrics_r.items()]
+        ease_all = torch.concat(ease_all)
+        ease_clean_all = torch.concat(ease_clean_all)
+        preds_all = torch.concat(preds_all)
+        preds_clean_all = torch.concat(preds_clean_all)
+        trg_clean_all = torch.concat(trg_clean_all)
+        trg_all = torch.concat(trg_all)
 
-        cleanout_metrics_p = [round(np.mean(j), 4) for _, j in cleanout_metrics_p.items()]
-        cleanout_metrics_r = [round(np.mean(j), 4) for _, j in cleanout_metrics_r.items()]
+        preds = {
+            'ease': {
+                'outputs': ease_all,
+                'targets': trg_all,
+            },
+            'ease_cleanout': {
+                'outputs': ease_clean_all,
+                'targets': trg_all,
+            },
+            'ease_cleanout_target': {
+                'outputs': ease_clean_all,
+                'targets': trg_clean_all,
+            },
+            't4rec': {
+                'outputs': preds_all,
+                'targets': trg_all,
+            },
+            't4rec_cleanout': {
+                'outputs': preds_clean_all,
+                'targets': trg_all,
+            },
+            't4rec_cleanout_target': {
+                'outputs': preds_clean_all,
+                'targets': trg_clean_all,
+            },
+        }
 
-        ease_metrics_p = [round(np.mean(j), 4) for _, j in ease_metrics_p.items()]
-        ease_metrics_r = [round(np.mean(j), 4) for _, j in ease_metrics_r.items()]
+        filepath = 'history/metrics_t4rec_ease_samples_all.pth'
+        metrics = dict()
 
-        ease_clean_metrics_p = [round(np.mean(j), 4) for _, j in ease_clean_metrics_p.items()]
-        ease_clean_metrics_r = [round(np.mean(j), 4) for _, j in ease_clean_metrics_r.items()]
+        for key, value in preds.items():
+            if key in metrics: continue
+            metrics[key] = metrics.get(key, dict())
+            print(key)
+            metrics[key].update(get_metrics(value['outputs'], value['targets'], average='samples'))
 
-        metrics_show += '\npredict\n'
-        metrics_show += 'Recall' + str(predict_metrics_r) + '\n'
-        metrics_show += 'Precision' + str(predict_metrics_p)+ '\n'
+        torch.save(metrics, filepath)
 
-        metrics_show += '\ncleanout\n'
-        metrics_show += 'Recall' + str(cleanout_metrics_r) + '\n'
-        metrics_show += 'Precision' + str(cleanout_metrics_p) + '\n'
+        colormap = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22',
+                    '#17becf']
 
-        metrics_show += '\nease\n'
-        metrics_show += 'Recall' + str(ease_clean_metrics_r) + '\n'
-        metrics_show += 'Precision' + str(ease_clean_metrics_p) + '\n'
+        def draw_chart(metrics):
+            model_keys = list(metrics.keys())
+            metric_keys = list(metrics[model_keys[-1]].keys())
+            # model_keys = [k for k in model_keys if '300_0.25' not in k and '300_0.75' not in k]
 
-        with open(f'history/{self.step_ckp}-metrics.txt', 'w', encoding='utf-8') as f:
-            f.write(metrics_show)
+            fig, ax = plt.subplots(nrows=len(metric_keys), ncols=1, figsize=(10, 36))  # 42
+            dax = dict()
+            for i, metric_key in enumerate(metric_keys):
+                for j, model_key in enumerate(model_keys):
+                    ax[i].plot(top_k, metrics[model_key][metric_key], label=model_key, marker='o', markersize=4,
+                               color=colormap[j], linestyle='-')
+                ax[i].set_xlabel('K')
+                ax[i].legend()
+                ax[i].set_xlim(min(top_k), max(top_k))
+                ax[i].set_title(f'{metric_key}@k')
+                ax[i].grid()
+            return fig, ax
 
-        plt.plot(top_k, ease_metrics_r, 'o-', label='ease')
-        plt.plot(top_k, ease_clean_metrics_r, 'o-', label='ease_clean')
-        plt.plot(top_k, cleanout_metrics_r, 'o-', label='clean')
-        plt.plot(top_k, predict_metrics_r, 'o-', label='predict')
-
-        plt.xlabel(f'x - top k Recall')
-        plt.ylabel('y - score')
-        plt.legend()
-        plt.savefig(f'history/Recall-{self.step_ckp}.png')
-        plt.clf()
-
-        plt.plot(top_k, ease_metrics_p, 'o-', label='ease')
-        plt.plot(top_k, ease_clean_metrics_p, 'o-', label='ease_clean')
-        plt.plot(top_k, cleanout_metrics_p, 'o-', label='clean')
-        plt.plot(top_k, predict_metrics_p, 'o-', label='predict')
-
-        plt.xlabel(f'x - top k Precision')
-        plt.ylabel('y - score')
-        plt.legend()
-        plt.savefig(f'history/Precision-{self.step_ckp}.png')
-        plt.clf()
+        fig, ax = draw_chart(metrics)
+        fig.savefig(f'history/metrics_t4rec_ease_samples_all_{self.step_ckp}.png', facecolor='w')  # , transparent=False)
 
         return EvalLoopOutput(
             predictions=all_preds_item_ids_scores,
