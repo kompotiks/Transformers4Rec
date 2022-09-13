@@ -113,7 +113,7 @@ SCALER_NAME = "scaler.pt"
 
 dataset_info = Reader('bigdata.h5')
 items_encoder = dataset_info.items_encoder
-
+SIZE_TENSOR = len(items_encoder) + 1
 df = pd.read_csv('poptop_item.csv')
 top_items = df.id_tov_cl.to_list()
 
@@ -125,7 +125,7 @@ ease_clean_df = pd.read_csv('ease_clean.csv', sep=';')
 softmax = nn.Softmax(dim=1)
 
 def create_top(items):
-    pred_tensor = torch.zeros((512, 2911), dtype=torch.long)
+    pred_tensor = torch.zeros((512, SIZE_TENSOR), dtype=torch.long)
     pred_tensor = pred_tensor.scatter_(1, items, 1)
     return pred_tensor
 
@@ -135,7 +135,7 @@ def get_top_k(items):
 
 
 def create_ease_pred(ease_df, id_users):
-    pred_ease_tensor = torch.zeros(512, len(top_items) + 3)
+    pred_ease_tensor = torch.zeros(512, SIZE_TENSOR)
     pred_ease_list = []
     for idx, id_user in enumerate(id_users):
         pred_ease = ease_df[ease_df.bonus_card == id_user].item_id.to_list()[0].split(',')
@@ -158,7 +158,7 @@ def get_metrics(pred, targets_binary, average='samples'):
 
 
 def astensor(indices):
-    sample = torch.zeros((512, 2911))
+    sample = torch.zeros((512, SIZE_TENSOR))
     for i in range(indices.shape[0]):
         tensor = indices[i, :]
         values = torch.arange(len(tensor))
@@ -502,13 +502,13 @@ class Trainer(BaseTrainer):
         metrics = {}
         metrics.update(
             {
-                f"Recall_top_{k}": Recall(num_classes=2911, top_k=k)
+                f"Recall_top_{k}": Recall(num_classes=SIZE_TENSOR, top_k=k)
                 for k in top_k
             }
         )
         metrics.update(
             {
-                f"Precision_top_{k}": Precision(num_classes=2911, top_k=k)
+                f"Precision_top_{k}": Precision(num_classes=SIZE_TENSOR, top_k=k)
                 for k in top_k
             }
         )
@@ -623,6 +623,7 @@ class Trainer(BaseTrainer):
                         preds.cuda(), labels.cuda(), mode=metric_key_prefix, forward=False, call_body=False
                     )
                     preds = preds.cpu()
+                    preds = preds[:, :SIZE_TENSOR]
 
                     ease_items = create_ease_pred(ease_df, train_inputs['user_id'])
                     ease_items += 1
@@ -646,7 +647,7 @@ class Trainer(BaseTrainer):
                     preds_clean_out = softmax(preds_clean_out)
                     preds_clean_all.append(preds_clean_out)
 
-                    labels_bin = torch.zeros(512, 2911, dtype=torch.long)
+                    labels_bin = torch.zeros(512, SIZE_TENSOR, dtype=torch.long)
                     labels_bin = labels_bin.scatter_(1, labels, 1)
                     labels_bin.cuda()
                     trg_all.append(labels_bin)
