@@ -115,13 +115,13 @@ dataset_info = Reader('bigdata.h5')
 items_encoder = dataset_info.items_encoder
 SIZE_TENSOR = len(items_encoder.classes_) + 1
 
-df = pd.read_csv('poptop_item.csv')
+df = pd.read_csv('data/poptop_item.csv')
 top_items = df.id_tov_cl.to_list()
 
 top_k = [10, 20, 30, 40, 50, 60, 70, 80, 90]
 
-ease_df = pd.read_csv('ease_predict.csv', sep=';')
-ease_clean_df = pd.read_csv('ease_clean.csv', sep=';')
+ease_df = pd.read_csv('data/ease_predict.csv', sep=';')
+ease_clean_df = pd.read_csv('data/ease_clean.csv', sep=';')
 
 softmax = nn.Softmax(dim=1)
 
