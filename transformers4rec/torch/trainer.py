@@ -98,7 +98,7 @@ from ..config.trainer import T4RecTrainingArguments
 from .model.base import Model
 from .utils.data_utils import T4RecDataLoader
 import pandas as pd
-from src.data.sets import UsersetTS
+from src.data import UsersetTS
 from vvrecsys.datasets.reader import Reader
 from vvrecsys.metrics import online, offline
 from sklearn.metrics import recall_score, precision_score
